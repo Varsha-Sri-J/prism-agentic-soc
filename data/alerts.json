@@ -1,0 +1,20 @@
+{
+  "alerts": [
+    {
+      "alert_id": "ALT-1042",
+      "timestamp": "2026-09-13T10:14:22Z",
+      "name": "Possible SQL Injection",
+      "severity": "CRITICAL",
+      "category": "Web Application Attack",
+      "source_ip": "10.20.14.52",
+      "source_port": 48922,
+      "target_asset": "web-server-03",
+      "target_ip": "192.168.10.15",
+      "target_port": 443,
+      "protocol": "TCP",
+      "signature": "WAF-RULE-3021: SQL UNION SELECT injection attempt",
+      "description": "Inbound HTTP GET request targeting /api/v1/users contains SQL syntax 'UNION SELECT'. Traffic routed through edge reverse proxy Proxy-LB01.",
+      "status": "OPEN"
+    }
+  ]
+}

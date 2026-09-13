@@ -1,0 +1,58 @@
+{
+  "topology_version": "1.0",
+  "description": "Enterprise perimeter and DMZ routing topology for production services",
+  "nodes": [
+    {
+      "id": "10.20.14.52",
+      "name": "External Host (Threat Source)",
+      "type": "external_endpoint",
+      "zone": "Internet/External",
+      "ip": "10.20.14.52"
+    },
+    {
+      "id": "Proxy-LB01",
+      "name": "DMZ Reverse Proxy & Load Balancer",
+      "type": "reverse_proxy",
+      "zone": "DMZ",
+      "ip": "192.168.1.10",
+      "routes_to": ["web-server-03"]
+    },
+    {
+      "id": "web-server-03",
+      "name": "Production Web Application Server",
+      "type": "application_server",
+      "zone": "Internal-LAN",
+      "ip": "192.168.10.15",
+      "upstream_route": "Proxy-LB01"
+    }
+  ],
+  "routes": [
+    {
+      "route_id": "ROUTE-EXT-DMZ",
+      "source": "10.20.14.52",
+      "target": "Proxy-LB01",
+      "route_type": "external_ingress",
+      "description": "Ingress traffic from external client 10.20.14.52 to DMZ Proxy Proxy-LB01"
+    },
+    {
+      "route_id": "ROUTE-PROXY-WEB03",
+      "source": "Proxy-LB01",
+      "target": "web-server-03",
+      "route_type": "upstream_forwarding",
+      "description": "Forwarded reverse-proxy traffic from Proxy-LB01 to backend web-server-03"
+    }
+  ],
+  "active_paths": [
+    {
+      "path_id": "PATH-ATTACK-01",
+      "source": "10.20.14.52",
+      "via": ["Proxy-LB01"],
+      "destination": "web-server-03",
+      "hops": [
+        "10.20.14.52",
+        "Proxy-LB01",
+        "web-server-03"
+      ]
+    }
+  ]
+}

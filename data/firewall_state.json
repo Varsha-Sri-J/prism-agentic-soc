@@ -1,0 +1,8 @@
+{
+  "firewall_mode": "SYNTHETIC_SIMULATED",
+  "blocked_ips": [],
+  "blocked_upstream_routes": [],
+  "firewall_rules": [],
+  "active_threat_mitigated": false,
+  "last_updated": "2026-09-13T10:15:00Z"
+}

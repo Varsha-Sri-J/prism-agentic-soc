@@ -1,0 +1,68 @@
+{
+  "assets": [
+    {
+      "asset_id": "web-server-03",
+      "hostname": "web-server-03.corp.internal",
+      "ip_address": "192.168.10.15",
+      "os": "Ubuntu 22.04 LTS",
+      "role": "Production Web Application Server",
+      "criticality": "HIGH",
+      "environment": "Production",
+      "subnet": "192.168.10.0/24",
+      "upstream_proxy": "Proxy-LB01",
+      "owner": "Core Services Team",
+      "services": [
+        {
+          "port": 80,
+          "service": "http",
+          "state": "open"
+        },
+        {
+          "port": 443,
+          "service": "https",
+          "version": "nginx/1.18.0 + Node.js/18",
+          "state": "open"
+        }
+      ]
+    },
+    {
+      "asset_id": "Proxy-LB01",
+      "hostname": "proxy-lb01.dmz.internal",
+      "ip_address": "192.168.1.10",
+      "os": "Alpine Linux 3.18",
+      "role": "Reverse Proxy & Load Balancer",
+      "criticality": "CRITICAL",
+      "environment": "DMZ",
+      "subnet": "192.168.1.0/24",
+      "services": [
+        {
+          "port": 443,
+          "service": "https",
+          "version": "HAProxy/2.6",
+          "state": "open"
+        }
+      ],
+      "forwarding_targets": [
+        "web-server-03"
+      ]
+    },
+    {
+      "asset_id": "db-server-01",
+      "hostname": "db-server-01.corp.internal",
+      "ip_address": "192.168.20.10",
+      "os": "Debian 12",
+      "role": "Production Database Server",
+      "criticality": "CRITICAL",
+      "environment": "Internal-DB",
+      "subnet": "192.168.20.0/24",
+      "services": [
+        {
+          "port": 5432,
+          "service": "postgresql",
+          "version": "PostgreSQL 15.4",
+          "state": "open"
+        }
+      ]
+    }
+  ]
+}

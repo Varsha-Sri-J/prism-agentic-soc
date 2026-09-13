@@ -1,0 +1,18 @@
+{
+  "vulnerabilities": [
+    {
+      "vuln_id": "VULN-2023-0881",
+      "asset_id": "web-server-03",
+      "cve_id": "CVE-2023-42819",
+      "title": "Unsanitized SQL Input in User Query Endpoint",
+      "vulnerability_type": "CWE-89: Improper Neutralization of Special Elements used in an SQL Command ('SQL Injection')",
+      "severity": "CRITICAL",
+      "cvss_score": 9.8,
+      "affected_component": "User Directory Service (/api/v1/users)",
+      "status": "UNPATCHED",
+      "exploitability": "HIGH",
+      "description": "The 'id' query parameter in /api/v1/users is concatenated directly into SQL queries without escaping or parameterized bindings, allowing arbitrary SQL command execution and data exfiltration.",
+      "remediation": "Apply patch v1.4.2 to implement parameterized queries on the user repository."
+    }
+  ]
+}

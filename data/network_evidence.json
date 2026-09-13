@@ -1,0 +1,27 @@
+{
+  "evidence": [
+    {
+      "evidence_id": "NET-EV-1042",
+      "alert_id": "ALT-1042",
+      "timestamp": "2026-09-13T10:14:21Z",
+      "flow_id": "FL-8821-TCP",
+      "source_ip": "10.20.14.52",
+      "source_port": 48922,
+      "proxy_node": "Proxy-LB01",
+      "proxy_ip": "192.168.1.10",
+      "target_asset": "web-server-03",
+      "target_ip": "192.168.10.15",
+      "target_port": 443,
+      "protocol": "TCP",
+      "connection_state": "ESTABLISHED_COMPLETED",
+      "request_reached_target": true,
+      "packets_to_target": 14,
+      "packets_from_target": 38,
+      "bytes_sent": 1280,
+      "bytes_received": 15980,
+      "payload_sni": "api.corp.internal",
+      "http_request_line": "GET /api/v1/users?id=1%27%20UNION%20SELECT%20username,password_hash%20FROM%20users-- HTTP/1.1",
+      "summary": "Network flow trace confirms that traffic from 10.20.14.52 traversed Proxy-LB01 and successfully reached target web-server-03. Response packet count and byte volume (15.9 KB) confirm successful payload execution and data extraction."
+    }
+  ]
+}
