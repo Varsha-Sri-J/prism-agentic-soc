@@ -369,27 +369,266 @@ class LLMDecisionEngine(DecisionEngine):
         },
     ]
 
+    REGISTERED_TOOLS = {
+        "get_alert": {"required": ["alert_id"]},
+        "get_asset": {"required": ["asset_id"]},
+        "search_vulnerabilities": {"required": ["asset_id"]},
+        "search_server_logs": {"required": ["host", "source_ip"]},
+        "get_network_evidence": {"required": ["alert_id"]},
+        "get_network_topology": {"required": []},
+        "block_ip": {"required": ["ip"]},
+        "block_upstream_route": {"required": ["route"]},
+        "verify_block": {"required": ["target"]},
+        "get_environment_state": {"required": []},
+    }
+
+    SYSTEM_PROMPT = """You are PRISM, an Autonomous SOC Investigation & Response Agent.
+Your objective is to investigate incoming security alerts, gather necessary evidence, determine if an attack succeeded, apply containment when justified, and verify the containment.
+
+SAFETY CONSTRAINTS:
+1. You may NEVER execute arbitrary code, shell commands, or network commands.
+2. You may ONLY call tools from the registered tool whitelist.
+3. You must maintain a concise decision rationale. Do NOT output hidden chain-of-thought.
+
+DECISION PROTOCOL:
+At each step, evaluate the provided INCIDENT STATE and decide the next action:
+- If evidence is missing, select the appropriate investigation tool.
+- If attack success is confirmed by evidence (vulnerability unpatched + exploit executed with 200 OK + exfiltration) and no containment is active, call 'block_ip'.
+- If an action has not been verified, call 'verify_block'.
+- If verification FAILED (traffic bypassed the block), investigate why by calling 'get_network_topology'.
+- If topology reveals an intermediate reverse-proxy or route bypass, call 'block_upstream_route'.
+- If post-action verification succeeds, conclude with action: 'finish'.
+
+OUTPUT FORMAT:
+Output MUST be a single JSON object. Choose ONE of the following formats:
+
+Option 1 (To call a tool):
+{
+  "action": "tool_call",
+  "tool": "<tool_name>",
+  "arguments": { "<arg_name>": "<arg_val>" },
+  "rationale": {
+    "decision": "<concise statement of what action is chosen>",
+    "reason": "<explanation based on evidence and uncertainty>"
+  }
+}
+
+Option 2 (When threat is contained and verified):
+{
+  "action": "finish",
+  "status": "CONTAINED",
+  "rationale": {
+    "decision": "Finish investigation",
+    "reason": "Post-action verification confirms malicious traffic is blocked."
+  }
+}
+"""
+
     def __init__(
         self,
-        provider: Optional[str] = None,
-        api_key: Optional[str] = None,
-        model_name: Optional[str] = None,
+        provider: Optional[Any] = None,
+        fallback_engine: Optional[DecisionEngine] = None,
     ) -> None:
-        self.provider = provider or os.getenv("LLM_PROVIDER", "deterministic").lower()
-        self.api_key = api_key or os.getenv("GEMINI_API_KEY") or os.getenv("OPENAI_API_KEY")
-        self.model_name = model_name or os.getenv("LLM_MODEL", "gemini-1.5-flash")
-        self.fallback_engine = DeterministicDecisionEngine()
+        from backend.llm_provider import GeminiProvider, LLMProvider, MockLLMProvider
+
+        if provider is not None:
+            self.provider: LLMProvider = provider
+        else:
+            provider_env = os.getenv("LLM_PROVIDER", "deterministic").lower()
+            gemini_key = os.getenv("GEMINI_API_KEY")
+            if provider_env == "gemini" and gemini_key:
+                self.provider = GeminiProvider()
+            else:
+                self.provider = MockLLMProvider()
+
+        self.fallback_engine: DecisionEngine = fallback_engine or DeterministicDecisionEngine()
+
+    @property
+    def mode_name(self) -> str:
+        """Returns readable mode name e.g. LIVE (gemini) or MOCK."""
+        from backend.llm_provider import GeminiProvider
+        if isinstance(self.provider, GeminiProvider) and self.provider.is_configured:
+            return f"LIVE (gemini:{self.provider.model_name})"
+        return "MOCK"
+
+    def validate_decision(self, data: Dict[str, Any]) -> Tuple[bool, str]:
+        """Validates structured tool call against PRISM safety whitelist."""
+        if not isinstance(data, dict):
+            return False, "Response must be a JSON object."
+
+        action = data.get("action")
+        if action not in ("tool_call", "finish"):
+            return False, f"Invalid action: '{action}'. Must be 'tool_call' or 'finish'."
+
+        rationale = data.get("rationale")
+        if not isinstance(rationale, dict):
+            return False, "Missing or invalid 'rationale' object."
+        if not rationale.get("decision") or not rationale.get("reason"):
+            return False, "'rationale' must contain non-empty 'decision' and 'reason'."
+
+        if action == "finish":
+            return True, "Valid finish decision."
+
+        # Validating tool_call
+        tool_name = data.get("tool")
+        if tool_name not in self.REGISTERED_TOOLS:
+            return False, f"Safety constraint violation: Tool '{tool_name}' is not in registered tool whitelist."
+
+        arguments = data.get("arguments")
+        if not isinstance(arguments, dict):
+            return False, f"'arguments' for tool '{tool_name}' must be an object."
+
+        required_args = self.REGISTERED_TOOLS[tool_name]["required"]
+        for arg in required_args:
+            if arg not in arguments:
+                return False, f"Missing required argument '{arg}' for tool '{tool_name}'."
+
+        return True, "Valid tool call."
 
     def decide(self, state: IncidentState) -> DecisionResult:
-        # If running in deterministic mode or no API key is available, use fallback engine
-        if self.provider == "deterministic" or not self.api_key:
-            return self.fallback_engine.decide(state)
+        """
+        Queries the LLM provider with compact incident state and validates the response.
+        Retries once on error; falls back to DeterministicDecisionEngine if retry fails.
+        """
+        compact_state = state.to_compact_state()
+        user_prompt = f"CURRENT INCIDENT STATE:\n{json.dumps(compact_state, indent=2)}\n\nDecide next step."
 
-        # For external LLM API calls, we would send the state summary and tools schema.
-        # In this hackathon environment without active outbound LLM API access,
-        # we fall back gracefully to the deterministic engine.
         try:
-            # Placeholder for actual LLM SDK call (e.g., google.generativeai or openai)
-            return self.fallback_engine.decide(state)
+            raw_response = self.provider.generate_decision(
+                system_prompt=self.SYSTEM_PROMPT,
+                user_prompt=user_prompt,
+                tools_schema=self.TOOLS_SCHEMA,
+            )
+            parsed, error = self._parse_json(raw_response)
+
+            if parsed:
+                is_valid, val_err = self.validate_decision(parsed)
+                if is_valid:
+                    return self._map_to_decision_result(parsed, state)
+                error = val_err
+        except Exception as exc:
+            error = str(exc)
+
+        # Retry once with correction prompt
+        retry_prompt = (
+            f"{user_prompt}\n\n"
+            f"ERROR IN PREVIOUS ATTEMPT: {error}\n"
+            "Please fix the error and output ONLY a valid JSON object matching the required schema."
+        )
+
+        try:
+            raw_retry = self.provider.generate_decision(
+                system_prompt=self.SYSTEM_PROMPT,
+                user_prompt=retry_prompt,
+                tools_schema=self.TOOLS_SCHEMA,
+            )
+            parsed_retry, error_retry = self._parse_json(raw_retry)
+            if parsed_retry:
+                is_valid, val_err = self.validate_decision(parsed_retry)
+                if is_valid:
+                    return self._map_to_decision_result(parsed_retry, state)
         except Exception:
-            return self.fallback_engine.decide(state)
+            pass
+
+        # Persistent failure -> fall back to DeterministicDecisionEngine
+        return self.fallback_engine.decide(state)
+
+    def _parse_json(self, text: str) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
+        """Extracts and parses JSON from model output, handling code block formatting."""
+        if not text:
+            return None, "Empty response from LLM provider."
+
+        cleaned = text.strip()
+        if "```json" in cleaned:
+            cleaned = cleaned.split("```json")[1].split("```")[0].strip()
+        elif "```" in cleaned:
+            cleaned = cleaned.split("```")[1].split("```")[0].strip()
+
+        try:
+            data = json.loads(cleaned)
+            return data, None
+        except json.JSONDecodeError as e:
+            return None, f"Invalid JSON: {e}"
+
+    def _map_to_decision_result(
+        self, parsed: Dict[str, Any], state: IncidentState
+    ) -> DecisionResult:
+        """Converts validated JSON dict into a DecisionResult."""
+        action = parsed.get("action")
+        rationale_dict = parsed.get("rationale", {})
+        rationale = DecisionRationale(
+            decision=rationale_dict.get("decision", ""),
+            reason=rationale_dict.get("reason", ""),
+        )
+
+        if action == "finish":
+            return DecisionResult(
+                action_type="CONCLUDE",
+                rationale=rationale,
+                tool=None,
+                tool_input={},
+                is_goal_satisfied=True,
+                status_update="CONTAINED",
+                confidence_update=1.0,
+                hypothesis_update="Incident resolved: Threat successfully contained and verified.",
+            )
+
+        tool = parsed.get("tool")
+        arguments = parsed.get("arguments", {})
+
+        status_update = None
+        hypothesis_update = None
+        confidence_update = None
+
+        # Determine action_type and state progression updates
+        if tool == "get_alert":
+            action_type = "INVESTIGATE"
+            status_update = "INVESTIGATING"
+            confidence_update = 0.2
+        elif tool == "get_asset":
+            action_type = "INVESTIGATE"
+            status_update = "INVESTIGATING"
+            confidence_update = 0.35
+        elif tool == "search_vulnerabilities":
+            action_type = "INVESTIGATE"
+            status_update = "INVESTIGATING"
+            confidence_update = 0.55
+            hypothesis_update = "Target host identified; checking known vulnerabilities."
+        elif tool == "search_server_logs":
+            action_type = "INVESTIGATE"
+            status_update = "INVESTIGATING"
+            confidence_update = 0.75
+            hypothesis_update = "Vulnerability confirmed; checking exploit execution in server logs."
+        elif tool == "get_network_evidence":
+            action_type = "INVESTIGATE"
+            status_update = "INVESTIGATING"
+            confidence_update = 0.9
+            hypothesis_update = "Server logs confirm exploit; verifying network delivery and exfiltration."
+        elif tool == "block_ip":
+            action_type = "ACT"
+            status_update = "CONTAINING"
+            confidence_update = 0.95
+            hypothesis_update = "Attack confirmed successful; applying initial perimeter IP block."
+        elif tool == "verify_block":
+            action_type = "VERIFY"
+            status_update = "VERIFYING"
+        elif tool == "get_network_topology":
+            action_type = "REPLAN" if state.failed_actions else "INVESTIGATE"
+            status_update = "REPLANNING"
+            hypothesis_update = "Containment failed; analyzing network topology to uncover routing bypass."
+        elif tool == "block_upstream_route":
+            action_type = "ACT"
+            status_update = "CONTAINING"
+            hypothesis_update = "Proxy forwarding detected; isolating upstream route via Proxy-LB01."
+        else:
+            action_type = "INVESTIGATE"
+
+        return DecisionResult(
+            action_type=action_type,
+            rationale=rationale,
+            tool=tool,
+            tool_input=arguments,
+            status_update=status_update,
+            hypothesis_update=hypothesis_update,
+            confidence_update=confidence_update,
+        )

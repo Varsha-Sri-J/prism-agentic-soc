@@ -27,6 +27,12 @@ from backend.tools import (
     verify_block,
 )
 
+from backend.llm_provider import (
+    GeminiProvider,
+    LLMProvider,
+    MockLLMProvider,
+)
+
 __all__ = [
     "SOCEnvironment",
     "get_environment",
@@ -49,4 +55,7 @@ __all__ = [
     "DeterministicDecisionEngine",
     "LLMDecisionEngine",
     "DecisionResult",
+    "LLMProvider",
+    "GeminiProvider",
+    "MockLLMProvider",
 ]

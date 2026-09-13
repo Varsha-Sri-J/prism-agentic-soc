@@ -25,8 +25,19 @@ class PRISMAgent:
         decision_engine: Optional[DecisionEngine] = None,
         environment: Optional[SOCEnvironment] = None,
     ) -> None:
-        self.engine: DecisionEngine = decision_engine or DeterministicDecisionEngine()
+        if decision_engine is not None:
+            self.engine = decision_engine
+        else:
+            from backend.decision_engine import LLMDecisionEngine
+            self.engine = LLMDecisionEngine()
         self.env: SOCEnvironment = environment or SOCEnvironment()
+
+    @property
+    def mode(self) -> str:
+        """Returns the active operational mode ('LIVE (gemini)' or 'MOCK')."""
+        if hasattr(self.engine, "mode_name"):
+            return getattr(self.engine, "mode_name")
+        return "MOCK"
 
     def run(self, alert_id: str = "ALT-1042", max_steps: int = 15) -> IncidentState:
         """

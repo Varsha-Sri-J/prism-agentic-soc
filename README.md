@@ -1,6 +1,6 @@
 # PRISM — Autonomous SOC Investigation & Response Agent
 
-**Autonomous SOC Agent & Synthetic Environment (Phase 1 & Phase 2)**  
+**Autonomous SOC Agent, Synthetic Environment & Real LLM Tool Calling (Phases 1, 2 & 3)**  
 *Built for the Tech Zephyr 4.0 Agentic AI Hackathon*
 
 ---
@@ -15,7 +15,8 @@ OBSERVE → DECIDE NEXT STEP → CALL TOOL → OBSERVE TOOL RESULT → UPDATE IN
 ```
 
 - **Phase 1:** Deterministic synthetic SOC environment, data stores, and verification engine.
-- **Phase 2:** Autonomous agent control loop, persistent `IncidentState`, dynamic tool selection, failure replanning, and dual-mode decision engine (deterministic + LLM tool calling).
+- **Phase 2:** Autonomous agent control loop, persistent `IncidentState`, dynamic tool selection, and failure replanning.
+- **Phase 3:** Real LLM-driven structured tool calling (Google Gemini support via `GEMINI_API_KEY`), strict validation and safety constraints, single-retry error recovery, deterministic fallback, and `LIVE` vs `MOCK` demonstration modes.
 
 ---
 
@@ -34,14 +35,16 @@ prism-agentic-soc/
 ├── backend/
 │   ├── __init__.py             # Public package exports
 │   ├── models.py               # IncidentState, DecisionRationale, AgentTraceEntry
-│   ├── decision_engine.py      # Deterministic & LLM-ready tool calling Decision Engines
-│   ├── agent.py                # Autonomous PRISMAgent control loop
+│   ├── llm_provider.py         # LLMProvider base, GeminiProvider (REST), MockLLMProvider
+│   ├── decision_engine.py      # LLMDecisionEngine (validation/retries/fallback) & DeterministicDecisionEngine
+│   ├── agent.py                # Autonomous PRISMAgent control loop with mode reporting
 │   ├── environment.py          # SOCEnvironment engine managing datasets and state
 │   └── tools.py                # 10 deterministic SOC tools
 ├── tests/
 │   ├── __init__.py
 │   ├── test_environment.py     # Phase 1 synthetic environment test suite (11 tests)
-│   └── test_agent.py           # Phase 2 autonomous agent test suite (14 tests)
+│   ├── test_agent.py           # Phase 2 autonomous agent test suite (14 tests)
+│   └── test_llm_engine.py      # Phase 3 LLM tool calling test suite (12 tests)
 ├── requirements.txt            # Dependencies (pytest)
 ├── .env.example                # LLM API configuration template
 ├── .gitignore
@@ -123,30 +126,79 @@ Reason:   Containment verification succeeded. Active probes confirm threat path 
 
 ---
 
-## 5. Running the Complete Test Suite
+---
 
-Run all 25 automated tests across Phase 1 and Phase 2:
+## 5. Demonstration Modes: LIVE vs MOCK
 
-```bash
-# Using pytest
-.venv/bin/pytest -v tests/
+PRISM operates in two primary execution modes:
 
-# Or using Python's standard library
-python3 -m unittest discover -s tests -p "test_*.py" -v
-```
-
-### Running the Live Agent Demonstration
+### MOCK Mode (Default / Offline)
+- Uses `MockLLMProvider` or `DeterministicDecisionEngine`.
+- Requires **no external API keys** or active internet connection.
+- Ideal for automated CI/CD, local evaluation, and test suites.
 
 ```bash
 python3 -c '
 from backend.agent import PRISMAgent
 
 agent = PRISMAgent()
+print(f"Active Mode: {agent.mode}")
 state = agent.run("ALT-1042")
-for t in state.trace:
-    print(f"STEP {t.step} [{t.action_type}] - {t.rationale.decision}")
-    if t.tool_selected:
-        print(f"  Tool: {t.tool_selected} -> {t.summarized_result}")
-print(f"\nFinal State: {state.status} | Confidence: {int(state.confidence*100)}%")
+print(f"Final Outcome: {state.status} | Confidence: {int(state.confidence*100)}%")
 '
 ```
+
+### LIVE Mode (Google Gemini)
+- Uses real LLM-driven structured tool calling via `GeminiProvider`.
+- Configure your Gemini API key in your environment or `.env` file:
+```bash
+export LLM_PROVIDER=gemini
+export GEMINI_API_KEY="your_gemini_api_key_here"
+export LLM_MODEL="gemini-1.5-flash"
+```
+- PRISM will automatically detect the configuration and operate in `LIVE (gemini:gemini-1.5-flash)` mode.
+- If the API key is missing or the network fails, PRISM automatically retries once and safely falls back to deterministic decision making.
+
+---
+
+## 6. Safety & Tool Whitelist Constraints
+
+The LLM decision engine enforces strict safety boundaries:
+1. **No Code Execution:** The LLM is never given access to Python `eval`, shell interpreters, or arbitrary system commands.
+2. **Strict Whitelist:** Tool calls are validated against the 10 registered PRISM tools:
+   - `get_alert`, `get_asset`, `search_vulnerabilities`, `search_server_logs`, `get_network_evidence`, `get_network_topology`, `block_ip`, `block_upstream_route`, `verify_block`, `get_environment_state`.
+3. **Parameter Verification:** All tool call arguments and types are strictly validated before execution.
+4. **No Hidden Chain-of-Thought:** Decisions only persist concise rationale objects (`decision` and `reason`).
+
+---
+
+## 7. Running the Complete Test Suite
+
+The test suite covers 37 automated tests across all 3 phases:
+
+```bash
+# Using pytest
+.venv/bin/pytest -v tests/
+
+# Or using Python standard library
+python3 -m unittest discover -s tests -p "test_*.py" -v
+```
+
+### Test Suite Verification Matrix
+
+- [x] **Phase 1: Synthetic SOC Environment** (11 tests in `tests/test_environment.py`)
+  - Retrieval of alerts, assets, vulnerabilities, server logs, network evidence, and topology.
+  - Verification failure after naive `block_ip`.
+  - Discovery of `Proxy-LB01` and successful containment via `block_upstream_route`.
+- [x] **Phase 2: Autonomous Agent Control Loop** (14 tests in `tests/test_agent.py`)
+  - Persistent `IncidentState` management and lifecycle progression.
+  - Multi-dimensional evidence correlation.
+  - Dynamic replanning triggered by failed verification (not a predetermined sequence).
+  - Clean trace generation and state updates.
+- [x] **Phase 3: Real LLM Tool Calling & Safety** (12 tests in `tests/test_llm_engine.py`)
+  - Structured decision parsing (`action="tool_call"` and `action="finish"`).
+  - Safety validation rejecting unwhitelisted and dangerous tools.
+  - Single-retry correction on malformed model responses.
+  - Graceful fallback to deterministic decision making.
+  - End-to-end investigation with dynamic replanning in `MOCK` mode.
+  - `LIVE` vs `MOCK` mode reporting.

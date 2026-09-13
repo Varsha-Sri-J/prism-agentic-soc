@@ -168,3 +168,81 @@ class IncidentState:
             f"Failed Actions: {len(self.failed_actions)} | "
             f"Verifications: {len(self.verification_results)}"
         )
+
+    def to_compact_state(self) -> Dict[str, Any]:
+        """Returns a compact, token-efficient representation of incident state for LLM context."""
+        alert_summary = None
+        if self.alert:
+            alert_summary = {
+                "alert_id": self.alert.get("alert_id"),
+                "name": self.alert.get("name"),
+                "source_ip": self.alert.get("source_ip"),
+                "target_asset": self.alert.get("target_asset"),
+                "severity": self.alert.get("severity"),
+            }
+
+        asset_summary = None
+        raw_asset = self.evidence_collected.get("asset")
+        if raw_asset:
+            asset_summary = {
+                "asset_id": raw_asset.get("asset_id"),
+                "role": raw_asset.get("role"),
+                "os": raw_asset.get("os"),
+                "criticality": raw_asset.get("criticality"),
+            }
+
+        vulns_summary = [
+            {"cve": v.get("cve_id"), "title": v.get("title"), "status": v.get("status")}
+            for v in self.evidence_collected.get("vulnerabilities", [])
+        ]
+
+        server_logs_summary = None
+        raw_logs = self.evidence_collected.get("server_logs", [])
+        if raw_logs:
+            server_logs_summary = {
+                "total_logs": len(raw_logs),
+                "exploit_found": any("UNION" in l.get("raw_request", "") or "UNION" in l.get("payload", "") for l in raw_logs),
+                "status_codes": [l.get("status_code") for l in raw_logs],
+            }
+
+        net_ev = self.evidence_collected.get("network_evidence")
+        net_summary = None
+        if net_ev:
+            net_summary = {
+                "flow_id": net_ev.get("flow_id"),
+                "reached_target": net_ev.get("request_reached_target"),
+                "proxy_node": net_ev.get("proxy_node"),
+                "bytes_received": net_ev.get("bytes_received"),
+            }
+
+        topology_summary = None
+        raw_topo = self.evidence_collected.get("network_topology")
+        if raw_topo:
+            topology_summary = {
+                "nodes": [n.get("id") for n in raw_topo.get("nodes", [])],
+                "active_paths": [p.get("hops") for p in raw_topo.get("active_paths", [])],
+            }
+
+        return {
+            "incident_id": self.incident_id,
+            "goal": self.goal,
+            "status": self.status,
+            "confidence": round(self.confidence, 2),
+            "current_hypothesis": self.current_hypothesis,
+            "alert": alert_summary,
+            "evidence": {
+                "asset": asset_summary,
+                "vulnerabilities": vulns_summary if vulns_summary else None,
+                "server_logs": server_logs_summary,
+                "network_evidence": net_summary,
+                "network_topology": topology_summary,
+            },
+            "actions_taken": [f"{a.get('action')}:{a.get('target')}" for a in self.actions_taken],
+            "actions_count": len(self.actions_taken),
+            "verifications_count": len(self.verification_results),
+            "last_verification": self.verification_results[-1] if self.verification_results else None,
+            "failed_actions": [
+                {"action": f.get("action", {}).get("action"), "reason": f.get("reason")}
+                for f in self.failed_actions
+            ],
+        }
